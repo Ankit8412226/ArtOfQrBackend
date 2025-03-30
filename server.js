@@ -16,7 +16,7 @@ require('dotenv').config();
 
 // CORS configuration
 const corsOptions = {
-  origin: ['http://localhost:5173', 'https://your-frontend-domain.com'],  // Allow both local and production front-end origins
+  origin: ['http://localhost:3000', 'https://your-frontend-domain.com'],  // Allow both local and production front-end origins
   methods: ['GET', 'POST', 'PUT', 'DELETE'], // Specify allowed methods
   credentials: true,                        // Allow cookies and credentials
   optionsSuccessStatus: 200                 // For older browsers that may not support default 204 status
@@ -45,12 +45,10 @@ app.use('/getMockup',getMockUrl);
 app.use('/upload', useUploadRouter);
 app.use('/upload-printify', useUploadPrintifyRouter);
 
-
-
-
-
-
-
+// Add test route
+app.get('/', (req, res) => {
+  res.json({ message: 'Server is running successfully!' });
+});
 
 // Start the server
 app.listen(process.env.PORT || 3001, () => {
