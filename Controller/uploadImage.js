@@ -149,6 +149,7 @@ const generateMockups = async (req, res) => {
           product_id: config.product_id,
           success: true,
           mockupTaskKey: response.data.result.task_key,
+          placement: config.body.files[0].placement, // Added placement to the result
           message: `Mockup generated successfully for product ID: ${config.product_id}`
         };
       } catch (error) {
@@ -315,6 +316,7 @@ const getMockupUrls = async (successfulMockups) => {
       successfulMockups.map(async (mockup) => ({
         product_id: mockup.product_id,
         mockupUrl: await getMockupUrl(mockup.mockupTaskKey),
+        placement: mockup.placement, // Added placement to the result
         message: mockup.message
       }))
     );
@@ -373,5 +375,4 @@ module.exports = {
   placeOrder,
   getMockupResults
 };
-
 
