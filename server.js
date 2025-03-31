@@ -14,6 +14,7 @@ const axios = require('axios');
 const exp = require('constants');
 require('dotenv').config();
 
+
 // CORS configuration
 const corsOptions = {
   origin: 'http://localhost:3000',  // Allow requests from localhost:3000

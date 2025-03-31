@@ -13,236 +13,170 @@ const PRINTFUL_API_KEY = "VLUOC2erat9bErXekeiQ3V2fmQ82vz6Vt3Htjv5o";
 const PRINTFUL_STORE_ID = '14805728';
 const PRINTFUL_BASE_URL = 'https://api.printful.com';
 
-// Fetch all synced products from Printful
+
+// 1. Get Synced Products API
 const getSyncedProducts = async (req, res) => {
   try {
-    console.log("hello")
-    const response = await axios.get(`${PRINTFUL_BASE_URL}/sync/products?store_id=${PRINTFUL_STORE_ID}`, {
-      headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` },
+    const response = await axios.get(
+      `${PRINTFUL_BASE_URL}/store/products?store_id=${PRINTFUL_STORE_ID}`,
+      { headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` } }
+    );
+    return res.status(200).json({
+      success: true,
+      products: response.data.result
     });
-    res.status(200).json(response.data);
-    console.log("done");
   } catch (error) {
-    console.error('Error fetching synced products:', error.message);
-    res.status(500).json({ error: 'Failed to fetch synced products' });
+    console.error('Error fetching synced products:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to fetch synced products',
+      details: error.response?.data || error.message
+    });
   }
 };
 
-// Upload base64 image to Supabase
-const uploadImageToSupabase = async (contents, fileName) => {
+
+
+
+
+// Product configurations
+const productConfigs = [
+  {
+    product_id: 223,
+    body: {
+      variant_ids: [8024, 8025, 8026, 8027, 8028],
+      printfile_id: 1,
+      format: "jpg",
+      width: 0,
+      product_options: {},
+      files: [
+        {
+          placement: "front",
+          position: {
+            area_width: 1800,
+            area_height: 2400,
+            width: 1200,
+            height: 1600,
+            top: 0,
+            left: 300
+          }
+        }
+      ]
+    }
+  },
+  {
+    product_id: 206,
+    body: {
+      variant_ids: [7853],
+      printfile_id: 75,
+      format: "jpg",
+      width: 0,
+      product_options: {},
+      files: [
+        {
+          placement: "embroidery_front_large",
+          position: {
+            area_width: 1650,
+            area_height: 600,
+            width: 825,
+            height: 600,
+            top: 0,
+            left: 412
+          }
+        }
+      ]
+    }
+  },
+
+  // Add more product configurations as needed
+];
+
+// 2. Generate Mockups API
+const generateMockups = async (req, res) => {
   try {
-    console.log('Starting Supabase upload process...');
-    
-    // Validate inputs
-    if (!contents) throw new Error('Image contents are required');
-    if (!fileName) throw new Error('File name is required');
+    const { file_name, contents } = req.body;
 
-    const mimeType = 'image/png';
-    let imageBuffer;
-
-    try {
-      // Handle the data URL format
-      if (contents.startsWith('data:')) {
-        imageBuffer = Buffer.from(contents.split(';base64,')[1], 'base64');
-      } else {
-        imageBuffer = Buffer.from(contents, 'base64');
-      }
-    } catch (error) {
-      console.error('Base64 conversion error:', error);
-      throw new Error('Invalid image contents');
+    if (!contents || !file_name) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required parameters'
+      });
     }
 
-    // Ensure unique filename
-    const uniqueFileName = `${Date.now()}-${fileName}`;
-    console.log('Uploading file:', uniqueFileName);
-    
+    // Upload to Supabase
+    const imageBlob = Buffer.from(contents.split(';base64,')[1], 'base64');
+    const uniqueFileName = `${Date.now()}-${file_name}`;
+
     const { data, error } = await supabase.storage
       .from('Images')
-      .upload(uniqueFileName, imageBuffer, {
+      .upload(uniqueFileName, imageBlob, {
         upsert: true,
-        contentType: mimeType
+        contentType: 'image/png'
       });
 
     if (error) {
-      console.error('Supabase storage error:', error);
-      throw new Error(`Supabase storage error: ${error.message}`);
+      console.error("Supabase upload error:", error);
+      return res.status(500).json({ error: "Image upload failed" });
     }
 
+    // Get public URL
     const { data: urlData } = supabase.storage
       .from('Images')
       .getPublicUrl(data.path);
 
-    console.log('Successfully uploaded to Supabase:', urlData.publicUrl);
-    return urlData.publicUrl;
+    const imageUrl = urlData.publicUrl;
 
-  } catch (error) {
-    console.error('uploadImageToSupabase error:', error);
-    throw error;
-  }
-};
-
-// Upload image to Printful
-const uploadImageToPrintful = async (imageUrl) => {
-  try {
-    const response = await axios.post(
+    // Upload to Printful
+    const printfulResponse = await axios.post(
       `${PRINTFUL_BASE_URL}/files?store_id=${PRINTFUL_STORE_ID}`,
       { url: imageUrl },
       { headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` } }
     );
-    return response.data.result.id;
-  } catch (error) {
-    console.error('Error uploading image to Printful:', error.message);
-    throw new Error('Failed to upload image to Printful');
-  }
-};
 
-// Generate mockups for all available products
-const generateMockups = async (req, res) => {
-  try {
-    console.log('Starting mockup generation process...');
-    const { file_name, contents } = req.body;  // Changed from base64, fileName to match your payload
+    // Generate mockups for each product configuration
+    const mockupPromises = productConfigs.map(async (config) => {
+      try {
+        // Add image URL to files configuration
+        config.body.files[0].image_url = imageUrl;
 
-    // Validate request body
-    if (!contents || !file_name) {  // Changed validation keys
-      return res.status(400).json({
-        success: false,
-        error: 'Missing required parameters',
-        details: {
-          contents: !contents ? 'Missing image contents' : undefined,
-          file_name: !file_name ? 'Missing file_name' : undefined
-        }
-      });
-    }
+        const response = await axios.post(
+          `${PRINTFUL_BASE_URL}/mockup-generator/create-task/${config.product_id}?store_id=${PRINTFUL_STORE_ID}`,
+          config.body,
+          { headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` } }
+        );
 
-    // Step 1: Upload to Supabase
-    let imageUrl;
-    try {
-      imageUrl = await uploadImageToSupabase(contents, file_name);  // Changed parameters
-      console.log('Supabase upload successful:', imageUrl);
-    } catch (error) {
-      console.error('Supabase upload failed:', error);
-      return res.status(500).json({
-        success: false,
-        error: 'Failed to upload image to Supabase',
-        details: error.message
-      });
-    }
+        return {
+          product_id: config.product_id,
+          success: true,
+          mockupTaskKey: response.data.result.task_key,
+          message: `Mockup generated successfully for product ID: ${config.product_id}`
+        };
+      } catch (error) {
+        console.error(`Error generating mockup for product ${config.product_id}:`, error);
+        return {
+          product_id: config.product_id,
+          success: false,
+          error: error.message,
+          message: `Failed to generate mockup for product ID: ${config.product_id}`
+        };
+      }
+    });
 
-    // Step 2: Upload to Printful
-    let printfulFileId;
-    try {
-      printfulFileId = await uploadImageToPrintful(imageUrl);
-      console.log('Printful upload successful, file ID:', printfulFileId);
-    } catch (error) {
-      console.error('Printful upload failed:', error);
-      return res.status(500).json({
-        success: false,
-        error: 'Failed to upload image to Printful',
-        details: error.message
-      });
-    }
+    const mockupResults = await Promise.all(mockupPromises);
 
-    // Step 3: Get synced products
-    let syncedProducts;
-    try {
-      const syncedProductsResponse = await axios.get(
-        `${PRINTFUL_BASE_URL}/sync/products?store_id=${PRINTFUL_STORE_ID}`,
-        { headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` } }
-      );
-      syncedProducts = syncedProductsResponse.data.result;
-      console.log(`Found ${syncedProducts.length} synced products`);
-    } catch (error) {
-      console.error('Failed to fetch synced products:', error);
-      return res.status(500).json({
-        success: false,
-        error: 'Failed to fetch synced products',
-        details: error.message
-      });
-    }
+    const successfulMockups = mockupResults.filter(result => result.success);
+    const failedMockups = mockupResults.filter(result => !result.success);
 
-    // Step 4: Generate mockups for each product
-    const mockupResults = await Promise.allSettled(
-      syncedProducts.map(async (product) => {
-        try {
-          console.log(`Processing product ${product.id}`);
-          
-          // Get variant details first
-          const variantResponse = await axios.get(
-            `${PRINTFUL_BASE_URL}/sync/products/${product.id}?store_id=${PRINTFUL_STORE_ID}`,
-            { headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` } }
-          );
-
-          // Default placement based on product type
-          let placement = 'front'; // default placement
-          
-          // Try to determine the best placement based on product type
-          const productType = variantResponse.data.result.sync_product.product.type_name;
-          if (productType) {
-            if (productType.toLowerCase().includes('poster') || 
-                productType.toLowerCase().includes('canvas') || 
-                productType.toLowerCase().includes('print')) {
-              placement = 'default';
-            } else if (productType.toLowerCase().includes('mug')) {
-              placement = 'front';
-            } else if (productType.toLowerCase().includes('phone')) {
-              placement = 'default';
-            }
-          }
-
-          console.log(`Generating mockup for product ${product.id} with placement ${placement}`);
-          
-          const mockupResponse = await axios.post(
-            `${PRINTFUL_BASE_URL}/mockup-generator/create-task/${product.id}?store_id=${PRINTFUL_STORE_ID}`,
-            {
-              files: [{ 
-                placement,
-                image_url: imageUrl 
-              }]
-      },
-      { headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` } }
-    );
-
-          return {
-            product_id: product.id,
-            product_name: product.name,
-            product_type: productType,
-            placement,
-            mockup_data: mockupResponse.data
-          };
-        } catch (error) {
-          console.error(`Error generating mockup for product ${product.id}:`, error);
-          return {
-            product_id: product.id,
-            error: `Failed: ${error.message}`,
-            product_type: error.productType || 'unknown'
-          };
-        }
-      })
-    );
-
-    // Process results
-    const successful = mockupResults
-      .filter(result => result.status === 'fulfilled')
-      .map(result => result.value);
-    
-    const failed = mockupResults
-      .filter(result => result.status === 'rejected')
-      .map(result => ({
-        error: result.reason.message
-      }));
-
-    // Send response
     return res.status(200).json({
       success: true,
-      message: 'Mockup generation completed',
       image_url: imageUrl,
-      printful_file_id: printfulFileId,
+      printful_file_id: printfulResponse.data.result.id,
       results: {
-        successful_mockups: successful,
-        failed_mockups: failed,
+        successful_mockups: successfulMockups,
+        failed_mockups: failedMockups,
         total_products: mockupResults.length,
-        successful_count: successful.length,
-        failed_count: failed.length
+        successful_count: successfulMockups.length,
+        failed_count: failedMockups.length
       }
     });
 
@@ -256,51 +190,188 @@ const generateMockups = async (req, res) => {
   }
 };
 
-// Get shipping rates
-const getShippingRates = async (recipient, items) => {
+// Updated waitForMockupCompletion with retry logic
+
+// 3. Get Shipping Rates API
+const getShippingRates = async (req, res) => {
   try {
+    const { recipient, items } = req.body;
+
+    if (!recipient || !items) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required parameters',
+        details: {
+          recipient: !recipient ? 'Missing recipient information' : undefined,
+          items: !items ? 'Missing items' : undefined
+        }
+      });
+    }
+
     const response = await axios.post(
       `${PRINTFUL_BASE_URL}/shipping/rates`,
       { recipient, items },
       { headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` } }
     );
-    return response.data.result[0].rate;
+
+    return res.status(200).json({
+      success: true,
+      rates: response.data.result
+    });
   } catch (error) {
-    console.error('Error fetching shipping rates:', error.message);
-    throw new Error('Failed to get shipping rates');
+    console.error('Shipping rates error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to get shipping rates',
+      details: error.response?.data || error.message
+    });
   }
 };
 
-// Place an order on Printful
+// 4. Place Order API
 const placeOrder = async (req, res) => {
   try {
-    const { recipient, items } = req.body;
-    
-    // Calculate delivery charge
-    const shippingCost = await getShippingRates(recipient, items);
-    
-    // Create order payload
-    const orderData = {
-      recipient,
-      items,
-      shipping: shippingCost,
-    };
-    
+    const { recipient, items, shipping_option_id } = req.body;
+
+    if (!recipient || !items || !shipping_option_id) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required parameters',
+        details: {
+          recipient: !recipient ? 'Missing recipient information' : undefined,
+          items: !items ? 'Missing items' : undefined,
+          shipping_option_id: !shipping_option_id ? 'Missing shipping option' : undefined
+        }
+      });
+    }
+
     const response = await axios.post(
       `${PRINTFUL_BASE_URL}/orders?store_id=${PRINTFUL_STORE_ID}`,
-      orderData,
+      {
+        recipient,
+        items,
+        shipping: shipping_option_id
+      },
       { headers: { Authorization: `Bearer ${PRINTFUL_API_KEY}` } }
     );
-    
-    res.status(200).json(response.data);
+
+    return res.status(200).json({
+      success: true,
+      order: response.data.result
+    });
   } catch (error) {
-    console.error('Error placing order:', error.message);
-    res.status(500).json({ error: 'Failed to place order' });
+    console.error('Order placement error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to place order',
+      details: error.response?.data || error.message
+    });
   }
 };
 
-module.exports = { getSyncedProducts, generateMockups, placeOrder };
+const getMockupResults = async (req, res) => {
+  try {
+    // Get payload from query params and parse it
+    const payload = JSON.parse(req.query.payload);
+    console.log('Received payload:', payload);
 
+    if (!payload || !Array.isArray(payload)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid payload. Expected an array of successful mockups.'
+      });
+    }
 
+    const mockupResults = await getMockupUrls(payload);
+
+    if (mockupResults && mockupResults.length > 0) {
+      return res.status(200).json({
+        success: true,
+        mockups: mockupResults
+      });
+    } else {
+      return res.status(500).json({
+        success: false,
+        message: "Error occurred when getting mockups"
+      });
+    }
+
+  } catch (error) {
+    console.error('Error getting mockup results:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to get mockup results',
+      details: error.message
+    });
+  }
+};
+
+const getMockupUrls = async (successfulMockups) => {
+  try {
+    console.log('Processing mockups:', successfulMockups);
+    
+    // Map and retrieve URLs for successful mockups
+    const successfulUrls = await Promise.all(
+      successfulMockups.map(async (mockup) => ({
+        product_id: mockup.product_id,
+        mockupUrl: await getMockupUrl(mockup.mockupTaskKey),
+        message: mockup.message
+      }))
+    );
+
+    return successfulUrls;
+  } catch (error) {
+    console.error('Error processing mockup URLs:', error);
+    return null;
+  }
+};
+
+const getMockupUrl = async (taskKey) => {
+  const url = `https://api.printful.com/mockup-generator/task?task_key=${taskKey}&store_id=${PRINTFUL_STORE_ID}`;
+
+  try {
+    const headers = {
+      'Authorization': `Bearer ${PRINTFUL_API_KEY}`
+    };
+    
+    console.log("Checking mockup status for task:", taskKey);
+    let status = 'pending';
+    let mockupUrl = null;
+
+    while (status === 'pending') {
+      console.log("Checking status...");
+      const response = await axios.get(url, { headers });
+      
+      if (response.status === 200) {
+        const result = response.data.result;
+        status = result.status;
+
+        if (status === 'completed') {
+          mockupUrl = result.mockups[0].mockup_url;
+          console.log('Mockup task completed. URL:', mockupUrl);
+        } else {
+          console.log('Mockup task is still pending, retrying...');
+          await new Promise(resolve => setTimeout(resolve, 500)); // Wait for 500ms before retrying
+        }
+      } else {
+        console.error('Error getting mockup task status:', response.data);
+        break;
+      }
+    }
+
+    return mockupUrl;
+  } catch (error) {
+    console.error('Error while checking mockup task status:', error.message);
+    return null;
+  }
+};
+
+module.exports = {
+  getSyncedProducts,
+  generateMockups,
+  getShippingRates,
+  placeOrder,
+  getMockupResults
+};
 
 
