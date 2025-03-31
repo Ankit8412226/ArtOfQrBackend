@@ -310,7 +310,7 @@ const getMockupUrls = async (successfulMockups) => {
   try {
     console.log('Processing mockups:', successfulMockups);
     
-    // Map and retrieve URLs for successful mockups
+    
     const successfulUrls = await Promise.all(
       successfulMockups.map(async (mockup) => ({
         product_id: mockup.product_id,
