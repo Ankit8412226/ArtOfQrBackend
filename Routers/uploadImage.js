@@ -1,11 +1,22 @@
 const express = require("express");
 const router = express.Router();
-const uploadBase64ImageController=require('../Controller/uploadImage')
+const { 
+  getSyncedProducts, 
+  generateMockups, 
+  placeOrder 
+} = require('../Controller/uploadImage');
 const fileUpload = require('express-fileupload');
 
 router.use(express.json());
 router.use(fileUpload());
-router.post('/',uploadBase64ImageController)
 
+// Fetch all synced products from Printful
+router.get('/products', getSyncedProducts);
 
-module.exports=router
+// Generate mockups for a product
+router.post('/mockups', generateMockups);
+
+// Place an order on Printful
+router.post('/order', placeOrder);
+
+module.exports = router;

@@ -14,16 +14,7 @@ const axios = require('axios');
 const exp = require('constants');
 require('dotenv').config();
 
-// CORS configuration
-const corsOptions = {
-  origin: ['http://localhost:3000', 'https://your-frontend-domain.com'],  // Allow both local and production front-end origins
-  methods: ['GET', 'POST', 'PUT', 'DELETE'], // Specify allowed methods
-  credentials: true,                        // Allow cookies and credentials
-  optionsSuccessStatus: 200                 // For older browsers that may not support default 204 status
-};
 
-// Use CORS middleware
-app.use(cors());
  
  
 app.use(bodyParser.json({limit: '50mb', extended: true}));
