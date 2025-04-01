@@ -231,7 +231,7 @@ const generateMockups = async (req, res) => {
 // 3. Get Shipping Rates API - Optimized
 const getShippingRates = async (req, res) => {
   try {
-    const { recipient, items } = req.body;
+    const { recipient ,items } = req.body;
 
     if (!recipient || !items) {
       return res.status(400).json({
@@ -239,12 +239,13 @@ const getShippingRates = async (req, res) => {
         error: 'Missing required parameters',
         details: {
           recipient: !recipient ? 'Missing recipient information' : undefined,
-          items: !items ? 'Missing items' : undefined
+          items: !items ? 'Missing items' : undefined,
+          store_id: PRINTFUL_STORE_ID 
         }
       });
     }
 
-    const response = await printfulClient.post('/shipping/rates', { recipient, items });
+    const response = await printfulClient.post(`/shipping/rates?store_id=${PRINTFUL_STORE_ID}`, { recipient ,items });
 
     return res.status(200).json({
       success: true,
