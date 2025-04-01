@@ -26,6 +26,7 @@
     "printful-sdk-js-v2": "^2.0.0-beta",
     "qrcode": "^1.5.4",
     "react-router-dom": "^6.26.2",
-    "sharp": "^0.33.5"
+    "sharp": "^0.33.5",
+    "stripe": "^17.7.0"
   }
 }
