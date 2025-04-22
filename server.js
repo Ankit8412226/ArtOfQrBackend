@@ -7,6 +7,7 @@ const getMockUrl = require("./Routers/getMockup");
 const uploadImageRouter = require("./Routers/uploadImage");
 const useUploadPrintifyRouter = require("./Routers/upload-printify");
 const stripeRouter = require("./Routers/stripeRoutes.js"); // Import the new Stripe router
+const newsletterRoutes = require("./Routers/newsLater.router.js"); // Import the new Stripe router
 const app = express();
 
 const axios = require("axios");
@@ -46,6 +47,7 @@ app.use("/getMockup", getMockUrl);
 app.use("/upload", useUploadRouter);
 app.use("/upload-printify", useUploadPrintifyRouter);
 app.use("/stripe", stripeRouter); // Mount the Stripe router
+app.use('/newsletter' , newsletterRoutes)
 
 // Add test route
 app.get("/", (req, res) => {
