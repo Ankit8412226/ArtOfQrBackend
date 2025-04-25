@@ -12,12 +12,49 @@ const PRINTFUL_STORE_ID = "14805728";
 const PRINTFUL_BASE_URL = "https://api.printful.com";
 
 // Create axios instance with default headers
+const sanitizeFileName = (fileName) => {
+  return fileName.replace(/[^a-zA-Z0-9.-]/g, "");
+};
+
+// Create axios instance with default headers
 const printfulClient = axios.create({
   baseURL: PRINTFUL_BASE_URL,
   headers: {
     Authorization: `Bearer ${PRINTFUL_API_KEY}`,
   },
 });
+
+// Add a response interceptor for rate limiting
+printfulClient.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    if (error.response && error.response.status === 429) {
+      const retryAfter =
+        parseInt(error.response.headers["retry-after"] || "10") * 1000;
+      console.log(
+        `Rate limited. Retrying after ${retryAfter / 1000} seconds...`
+      );
+
+      // Wait for the retry-after period
+      await new Promise((resolve) => setTimeout(resolve, retryAfter));
+
+      // Retry the request
+      return printfulClient(error.config);
+    }
+    return Promise.reject(error);
+  }
+);
+
+// Check if image is accessible
+const validateImage = async (url) => {
+  try {
+    const response = await axios.head(url);
+    return response.status === 200;
+  } catch (error) {
+    console.error("Image validation failed:", error.message);
+    return false;
+  }
+};
 
 // Product configurations with pricing information
 const productConfigs = [
@@ -130,9 +167,12 @@ const generateMockups = async (req, res) => {
       });
     }
 
+    // Clean the filename before uploading
+    const sanitizedFileName = sanitizeFileName(file_name);
+    const uniqueFileName = `${Date.now()}-${sanitizedFileName}`;
+
     // Upload to Supabase
     const imageBlob = Buffer.from(contents.split(";base64,")[1], "base64");
-    const uniqueFileName = `${Date.now()}-${file_name}`;
 
     const { data, error } = await supabase.storage
       .from("Images")
@@ -143,7 +183,11 @@ const generateMockups = async (req, res) => {
 
     if (error) {
       console.error("Supabase upload error:", error);
-      return res.status(500).json({ error: "Image upload failed" });
+      return res.status(500).json({
+        success: false,
+        error: "Image upload failed",
+        details: error,
+      });
     }
 
     // Get public URL
@@ -153,13 +197,36 @@ const generateMockups = async (req, res) => {
 
     const imageUrl = urlData.publicUrl;
 
-    // Upload to Printful
-    const printfulResponse = await printfulClient.post(
-      `/files?store_id=${PRINTFUL_STORE_ID}`,
-      { url: imageUrl }
-    );
+    // Validate image is accessible
+    const isImageValid = await validateImage(imageUrl);
+    if (!isImageValid) {
+      return res.status(400).json({
+        success: false,
+        error: "The uploaded image is not accessible or cannot be validated",
+      });
+    }
 
-    // Batch process for mockup generation
+    // Upload to Printful with retry mechanism
+    let printfulFileId;
+    try {
+      const printfulResponse = await printfulClient.post(
+        `/files?store_id=${PRINTFUL_STORE_ID}`,
+        { url: imageUrl }
+      );
+      printfulFileId = printfulResponse.data.result.id;
+    } catch (error) {
+      console.error(
+        "Printful file upload error:",
+        error.response?.data || error
+      );
+      return res.status(500).json({
+        success: false,
+        error: "Failed to upload file to Printful",
+        details: error.response?.data || error.message,
+      });
+    }
+
+    // Batch process for mockup generation with rate limit handling
     const mockupPromises = productConfigs.map(async (config) => {
       try {
         // Add image URL to files configuration
@@ -170,6 +237,9 @@ const generateMockups = async (req, res) => {
             image_url: imageUrl,
           })),
         };
+
+        // Add a small delay between each request to avoid rate limiting
+        await new Promise((resolve) => setTimeout(resolve, 200));
 
         const response = await printfulClient.post(
           `/mockup-generator/create-task/${config.product_id}?store_id=${PRINTFUL_STORE_ID}`,
@@ -191,13 +261,13 @@ const generateMockups = async (req, res) => {
       } catch (error) {
         console.error(
           `Error generating mockup for product ${config.product_id}:`,
-          error
+          error.response?.data || error
         );
         return {
           product_id: config.product_id,
           product_name: config.name,
           success: false,
-          error: error.message,
+          error: error.response?.data?.error || error.message,
           message: `Failed to generate mockup for product ID: ${config.product_id}`,
         };
       }
@@ -222,7 +292,7 @@ const generateMockups = async (req, res) => {
     return res.status(200).json({
       success: true,
       image_url: imageUrl,
-      printful_file_id: printfulResponse.data.result.id,
+      printful_file_id: printfulFileId,
       results: {
         successful_mockups: successfulMockups,
         failed_mockups: failedMockups,
@@ -323,10 +393,10 @@ const placeOrder = async (req, res) => {
 const getMockupResults = async (req, res) => {
   try {
     // Get payload from query params and parse it
-    const payload = JSON.parse(req.query.payload);
+    const payload = JSON.parse(req.query.payload || "[]");
     console.log("Received payload:", payload);
 
-    if (!payload || !Array.isArray(payload)) {
+    if (!Array.isArray(payload) || payload.length === 0) {
       return res.status(400).json({
         success: false,
         error: "Invalid payload. Expected an array of successful mockups.",
@@ -335,20 +405,46 @@ const getMockupResults = async (req, res) => {
 
     const mockupResults = await Promise.all(
       payload.map(async (mockup) => {
-        const mockupUrl = await getMockupUrl(mockup.mockupTaskKey);
-        return {
-          product_id: mockup.product_id,
-          product_name: mockup.product_name,
-          pricing: mockup.pricing,
-          mockupUrl,
-          placement: mockup.placement,
-          message: mockup.message,
-        };
+        try {
+          if (!mockup || !mockup.mockupTaskKey) {
+            console.error("Invalid mockup data:", mockup);
+            return {
+              product_id: mockup?.product_id,
+              product_name: mockup?.product_name,
+              success: false,
+              error: "Missing mockup task key",
+            };
+          }
+
+          const mockupUrl = await getMockupUrl(mockup.mockupTaskKey);
+          return {
+            product_id: mockup.product_id,
+            product_name: mockup.product_name,
+            pricing: mockup.pricing,
+            mockupUrl,
+            success: !!mockupUrl,
+            placement: mockup.placement,
+            message: mockupUrl
+              ? `Mockup retrieved successfully for ${mockup.product_name}`
+              : `Failed to retrieve mockup for ${mockup.product_name}`,
+          };
+        } catch (error) {
+          console.error(
+            `Error processing mockup ${mockup?.product_id}:`,
+            error
+          );
+          return {
+            product_id: mockup?.product_id,
+            product_name: mockup?.product_name,
+            success: false,
+            error: error.message,
+          };
+        }
       })
     );
 
-    const successfulMockups = mockupResults.filter((m) => m.mockupUrl);
-    const failedMockups = mockupResults.filter((m) => !m.mockupUrl);
+    const successfulMockups = mockupResults.filter((m) => m.success);
+    const failedMockups = mockupResults.filter((m) => !m.success);
 
     return res.status(200).json({
       success: true,
@@ -370,10 +466,11 @@ const getMockupResults = async (req, res) => {
   }
 };
 
-// Optimized mockup URL fetching with parallel processing
+// Optimized mockup URL fetching with exponential backoff
 const getMockupUrl = async (taskKey) => {
   const maxAttempts = 10;
-  const waitTime = 1000; // 1 second between attempts
+  let waitTime = 1000; // Start with 1 second
+  const maxWaitTime = 8000; // Max 8 seconds between attempts
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
@@ -390,6 +487,12 @@ const getMockupUrl = async (taskKey) => {
         return null;
       }
 
+      // Exponential backoff
+      waitTime = Math.min(waitTime * 1.5, maxWaitTime);
+      console.log(
+        `Waiting ${waitTime / 1000}s before next attempt for task ${taskKey}`
+      );
+
       // Wait before next attempt
       await new Promise((resolve) => setTimeout(resolve, waitTime));
     } catch (error) {
@@ -398,7 +501,8 @@ const getMockupUrl = async (taskKey) => {
         error.message
       );
 
-      // Wait before retry after error
+      // Exponential backoff after error
+      waitTime = Math.min(waitTime * 2, maxWaitTime);
       await new Promise((resolve) => setTimeout(resolve, waitTime));
     }
   }
