@@ -8,6 +8,7 @@ const uploadImageRouter = require("./Routers/uploadImage");
 const useUploadPrintifyRouter = require("./Routers/upload-printify");
 const stripeRouter = require("./Routers/stripeRoutes.js"); // Import the new Stripe router
 const newsletterRoutes = require("./Routers/newsLater.router.js"); // Import the new Stripe router
+const contactRoutes = require("./Routers/contactForm.router.js"); // Import the new Stripe router
 const app = express();
 
 const axios = require("axios");
@@ -48,6 +49,7 @@ app.use("/upload", useUploadRouter);
 app.use("/upload-printify", useUploadPrintifyRouter);
 app.use("/stripe", stripeRouter); // Mount the Stripe router
 app.use('/newsletter' , newsletterRoutes)
+app.use('/contact' , contactRoutes)
 
 // Add test route
 app.get("/", (req, res) => {
