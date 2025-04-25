@@ -62,7 +62,7 @@ const stripeCheckoutController = async (req, res) => {
         quantity: items[0].quantity,
         shipping_name: shipping.name,
         shipping_rate: shipping.rate,
-        status: "pending", 
+        status: "completed", 
         session_id: session.id,
       },
     ]);
